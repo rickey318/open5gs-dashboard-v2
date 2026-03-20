@@ -1,167 +1,234 @@
-# Open5GS Enhanced Dashboard
+# Open5GS Enhanced Dashboard v2
 
-A full-featured management dashboard for Open5GS, running as a separate Docker container alongside your existing stack.
+A full-featured web dashboard for managing Open5GS 4G/5G core networks. Runs as a single Docker container alongside your existing Open5GS stack — no modifications to your existing setup required.
+
+![Dashboard](https://img.shields.io/badge/Open5GS-Dashboard-00d4ff?style=flat-square)
+![Docker](https://img.shields.io/badge/Docker-Required-blue?style=flat-square&logo=docker)
+![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
+
+---
+
+## Screenshots
+
+| Dashboard | Services | Subscribers |
+|---|---|---|
+| Live stats, service health, activity log | All Open5GS containers with start/stop/restart | Full CRUD, bulk CSV import/export |
+
+---
 
 ## Features
 
-| Feature | Details |
+| Section | Description |
 |---|---|
-| **Subscriber Management** | Add, edit, delete subscribers with IMSI, MSISDN, K/OPc keys, AMF, slices |
-| **APN / DNN Management** | View all APNs/DNNs derived from subscriber sessions |
-| **Service Status** | Real-time status of all Open5GS processes (AMF, SMF, UPF, MME, HSS, etc.) |
-| **eNB / gNB Count** | Connected base station count from MongoDB context collections |
-| **UE Count** | Connected UE count from AMF/MME context |
-| **Activity Log** | Live log of actions taken in the dashboard |
-| **Auto-refresh** | Data refreshes every 30 seconds automatically |
+| **Dashboard** | Live stat cards, service health, activity log |
+| **Services** | Real-time container status, restart/start/stop |
+| **Subscribers** | Add, edit, delete, search, export CSV, bulk import |
+| **APNs / DNNs** | APN overview and subscriber distribution |
+| **eNBs / gNBs** | Connected base stations and UE counts |
+| **Alarm Feed** | Live container log events, filterable by severity |
+| **Resources** | CPU and memory usage per container |
+| **IP Pool** | UE IP address assignments |
+| **DNS Records** | IMS and EPC DNS zone viewer |
+| **PyHSS** | IMS HSS subscriber, AUC, and roaming data |
+| **User Management** | Create/delete users, reset passwords (admin) |
+| **Audit Log** | Full action history with user, IP, timestamp (admin) |
+| **Change Password** | Self-service password change |
 
 ---
 
-## Prerequisites
+## Requirements
 
 - Docker and Docker Compose
-- Open5GS already running (with MongoDB accessible on a Docker network)
-- Your Open5GS MongoDB service name (default: `mongo`)
-- Your Open5GS Docker network name
+- Running Open5GS stack with:
+  - MongoDB container named `mongo` on network `docker_open5gs_default`
+  - Prometheus container named `metrics` (for eNB/UE counts)
+  - PyHSS container named `pyhss` (optional, for IMS data)
+- Port `3080` available on the host
 
 ---
 
-## Quick Start
+## Quick Install
 
-### 1. Find your Open5GS Docker network
+### 1. Clone the repo
 
 ```bash
-docker network ls
-# Look for something like: open5gs_default, open5gs_net, etc.
-docker inspect <your-open5gs-container> | grep NetworkMode
+git clone https://github.com/rickey318/open5gs-dashboard-v2.git
 ```
 
-### 2. Clone / copy this dashboard folder
+### 2. Copy files into your Open5GS directory
 
-Place the `open5gs-dashboard/` folder next to your existing `docker-compose.yml`.
+```bash
+cp -r open5gs-dashboard-v2/open5gs-dashboard ~/docker_open5gs/
+cp open5gs-dashboard-v2/docker-compose.dashboard.yml ~/docker_open5gs/
+```
 
-### 3. Configure the compose file
+### 3. Run the installer
 
-Edit `docker-compose.dashboard.yml`:
+```bash
+bash ~/docker_open5gs/open5gs-dashboard/install.sh
+```
+
+### 4. Open in your browser
+
+```
+http://YOUR_SERVER_IP:3080
+```
+
+Default login: `admin` / `admin` — **change your password after first login**
+
+---
+
+## Manual Install (without the install script)
+
+```bash
+# 1. Copy files
+cp -r open5gs-dashboard-v2/open5gs-dashboard ~/docker_open5gs/
+cp open5gs-dashboard-v2/docker-compose.dashboard.yml ~/docker_open5gs/
+
+# 2. Build and start
+cd ~/docker_open5gs
+docker compose -f docker-compose.dashboard.yml up -d --build
+
+# 3. Create admin user (first time only)
+docker exec -it mongo mongosh open5gs --eval "
+const crypto = require('crypto');
+const salt = crypto.randomBytes(16).toString('hex');
+const hash = crypto.createHmac('sha256', salt).update('admin').digest('hex');
+db.dashboard_users.insertOne({
+  username: 'admin', hash, salt,
+  role: 'admin', mustChangePassword: false,
+  createdAt: new Date()
+});
+print('Admin user created — login: admin / admin');
+"
+```
+
+---
+
+## Configuration
+
+Edit `docker-compose.dashboard.yml` before deploying:
 
 ```yaml
 environment:
-  MONGO_URI: "mongodb://mongo:27017/open5gs"   # Your MongoDB service name
-  OPEN5GS_WEBUI_URL: "http://open5gs-webui:3000"
-
-networks:
-  open5gs_default:
-    external: true   # Change to your actual network name
+  MONGO_URI: "mongodb://mongo:27017/open5gs"   # Your MongoDB URI
+  OPEN5GS_WEBUI_URL: "http://webui:9999"       # Open5GS WebUI URL
+  SESSION_SECRET: "change-me-to-a-random-string" # Change this!
+  PORT: "3001"
 ```
 
-### 4. Launch the dashboard
+To serve on a different port, change `"3080:3080"` to `"YOUR_PORT:3080"`.
+
+---
+
+## Directory Structure
+
+```
+open5gs-dashboard/          ← copy this folder into ~/docker_open5gs/
+├── backend/
+│   ├── server.js           # Express API (auth, subscribers, containers, etc.)
+│   └── package.json
+├── frontend/
+│   └── index.html          # Single-page dashboard UI
+├── nginx/
+│   └── default.conf        # Reverse proxy config
+├── Dockerfile
+├── supervisord.conf
+└── install.sh              # Automated installer
+
+docker-compose.dashboard.yml  ← copy this to ~/docker_open5gs/
+README.md
+```
+
+---
+
+## Common Commands
 
 ```bash
-# Option A: Alongside existing compose
-docker-compose -f docker-compose.yml -f docker-compose.dashboard.yml up -d
+# Start
+cd ~/docker_open5gs && docker compose -f docker-compose.dashboard.yml up -d
 
-# Option B: Standalone
-cd open5gs-dashboard
-docker-compose -f docker-compose.dashboard.yml up -d --build
-```
+# Stop
+cd ~/docker_open5gs && docker compose -f docker-compose.dashboard.yml down
 
-### 5. Open the dashboard
+# View logs
+docker logs open5gs-dashboard -f --tail=50
 
-```
-http://<your-server-ip>:3080
-```
+# Rebuild after updating files
+docker compose -f docker-compose.dashboard.yml up -d --build --force-recreate
 
----
-
-## Environment Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `MONGO_URI` | `mongodb://localhost:27017/open5gs` | MongoDB connection string |
-| `OPEN5GS_WEBUI_URL` | `http://open5gs-webui:3000` | URL of the original Open5GS WebUI |
-| `PORT` | `3001` | Internal API port (not exposed externally) |
-
----
-
-## Network Configuration
-
-The dashboard container needs to be on the **same Docker network** as your MongoDB instance.
-
-```bash
-# Find your Open5GS network name
-docker network ls
-
-# Inspect to confirm MongoDB is on it
-docker network inspect <network-name>
-```
-
-Then update `docker-compose.dashboard.yml`:
-```yaml
-networks:
-  your_actual_network_name:   # <-- change this
-    external: true
+# Reset admin password back to 'admin'
+docker exec -it mongo mongosh open5gs --eval "
+const crypto = require('crypto');
+const salt = crypto.randomBytes(16).toString('hex');
+const hash = crypto.createHmac('sha256', salt).update('admin').digest('hex');
+db.dashboard_users.updateOne(
+  {username:'admin'},
+  {\$set:{hash,salt,mustChangePassword:false}}
+);
+print('Password reset to: admin');
+"
 ```
 
 ---
 
-## eNB / gNB & UE Counts
+## How It Works
 
-The dashboard reads from these MongoDB collections if they exist:
-
-- `ueContexts` — Connected UEs
-- `gnbContexts` or `enbContexts` — Connected base stations  
-- `smContexts` — Active PDU sessions
-
-These are populated **only when Open5GS is running and nodes are actively connected**. If you see `N/A`, the collections don't exist yet — this is normal when no devices are attached.
-
-For a more accurate live count, Open5GS 2.6+ exposes a Prometheus metrics endpoint. You can extend the backend `server.js` to scrape `http://amf:9090/metrics` for real-time UE counts.
-
----
-
-## Ports
-
-| Port | Service |
-|---|---|
-| `3080` | Dashboard UI (nginx) |
-| `3001` | Internal API (not exposed, nginx proxies to it) |
-
-To change the external port, edit `docker-compose.dashboard.yml`:
-```yaml
-ports:
-  - "8080:3080"   # Access on port 8080 instead
+```
+Browser → nginx (port 3080) → static index.html
+                             → /api/* proxy → Express (port 3001)
+                                              ├── MongoDB (subscribers, users, audit)
+                                              ├── Prometheus (eNB/UE metrics)
+                                              ├── Docker socket (container status/control)
+                                              └── PyHSS API (IMS data)
 ```
 
----
-
-## Rebuilding After Changes
-
-```bash
-docker-compose -f docker-compose.dashboard.yml up -d --build --force-recreate
-```
+The dashboard container joins `docker_open5gs_default` network and communicates with other containers by name.
 
 ---
 
 ## Troubleshooting
 
-**Can't connect to MongoDB**
+**Container won't start**
 ```bash
-docker logs open5gs-dashboard
-# Look for "MongoDB connection failed"
-
-# Test connectivity from inside the container
-docker exec -it open5gs-dashboard sh
-apk add mongodb-tools
-mongosh "mongodb://mongo:27017/open5gs"
+docker logs open5gs-dashboard --tail=30
 ```
 
-**Services all showing "unknown"**
-
-Process detection (`pgrep`) works when Open5GS processes are on the same host or container. If running in separate containers, processes won't be visible. Extend the `/api/services` endpoint to use HTTP health checks against each service's API port instead.
-
-**Dashboard not accessible**
+**Can't login / forgot password**
 ```bash
-# Check the container is running
-docker ps | grep open5gs-dashboard
-
-# Check logs
-docker logs -f open5gs-dashboard
+# Run the reset command in the Common Commands section above
 ```
+
+**eNBs/gNBs shows 0 or N/A**
+- Verify Prometheus is running: `docker ps | grep metrics`
+- Prometheus must be accessible at `http://metrics:9090`
+
+**PyHSS section shows error**
+- Verify PyHSS is running: `docker ps | grep pyhss`
+- PyHSS API must be accessible at `http://pyhss:8080`
+
+**Sections show blank or fail to load**
+- Check the browser console (F12) for errors
+- Verify the Open5GS network exists: `docker network ls | grep open5gs`
+- Verify MongoDB is running: `docker ps | grep mongo`
+
+---
+
+## Security
+
+- **Change** the default `admin` password after first login
+- **Change** `SESSION_SECRET` in docker-compose.dashboard.yml to a random string
+- The dashboard runs over **HTTP** — for production use, put it behind an HTTPS reverse proxy (nginx, Caddy)
+- The Docker socket mount gives the dashboard control over containers — limit network access appropriately
+
+---
+
+## License
+
+MIT — free to use, modify, and distribute.
+
+---
+
+## Acknowledgements
+
+Built for [Open5GS](https://open5gs.org/) — the open source 5G and LTE mobile packet core network implementation.
